@@ -1,10 +1,19 @@
 from datetime import datetime, timedelta
-import secrets
 from functools import wraps
+from io import BytesIO
+import base64
+import os
+import secrets
 
+import qrcode
 from flask import (
-    Blueprint, request, redirect, url_for,
-    render_template_string, send_file, session
+    Blueprint,
+    request,
+    redirect,
+    url_for,
+    render_template_string,
+    send_file,
+    session,
 )
 
 from .extensions import db
@@ -14,17 +23,53 @@ from .services.export_service import build_attendance_excel
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "123456")
+
+
+def login_required(view_func):
+    @wraps(view_func)
+    def wrapped_view(*args, **kwargs):
+        if not session.get("admin_logged_in"):
+            return redirect(url_for("admin.login"))
+        return view_func(*args, **kwargs)
+
+    return wrapped_view
+
+
+def generate_qr_base64(data: str) -> str:
+    qr = qrcode.QRCode(
+        version=1,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(data)
+    qr.make(fit=True)
+
+    img = qr.make_image(fill_color="black", back_color="white")
+
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+
 LOGIN_HTML = """
 <!doctype html>
 <html>
-<head><meta charset="utf-8"><title>管理員登入</title></head>
+<head>
+    <meta charset="utf-8">
+    <title>管理員登入</title>
+</head>
 <body>
     <h1>管理員登入</h1>
+
     <form method="post">
         <label>密碼：</label>
         <input type="password" name="password" required>
         <button type="submit">登入</button>
     </form>
+
     {% if message %}
     <p style="color:red;">{{ message }}</p>
     {% endif %}
@@ -35,7 +80,10 @@ LOGIN_HTML = """
 DASHBOARD_HTML = """
 <!doctype html>
 <html>
-<head><meta charset="utf-8"><title>後台</title></head>
+<head>
+    <meta charset="utf-8">
+    <title>管理後台</title>
+</head>
 <body>
     <h1>管理後台</h1>
 
@@ -56,7 +104,8 @@ DASHBOARD_HTML = """
             ID={{ s.id }} | {{ s.section }} | {{ s.course_date }}
             | 開始：{{ s.opens_at }}
             | 結束：{{ s.closes_at }}
-            | <a href="{{ url_for('checkin.checkin', session_id=s.id, token=s.qr_token) }}">簽到連結</a>
+            | <a href="{{ url_for('admin.session_qr', session_id=s.id) }}">顯示 QR code</a>
+            | <a href="{{ url_for('checkin.checkin', session_id=s.id, token=s.qr_token) }}" target="_blank">學生簽到頁</a>
         </li>
     {% endfor %}
     </ul>
@@ -67,9 +116,13 @@ DASHBOARD_HTML = """
 CREATE_SESSION_HTML = """
 <!doctype html>
 <html>
-<head><meta charset="utf-8"><title>建立課次</title></head>
+<head>
+    <meta charset="utf-8">
+    <title>建立課次</title>
+</head>
 <body>
     <h1>建立課次</h1>
+
     <form method="post">
         <label>時段：</label>
         <select name="section">
@@ -83,11 +136,6 @@ CREATE_SESSION_HTML = """
     <p style="color:green;">{{ message }}</p>
     {% endif %}
 
-    {% if checkin_url %}
-    <p>簽到網址：</p>
-    <p><a href="{{ checkin_url }}">{{ checkin_url }}</a></p>
-    {% endif %}
-
     <p><a href="{{ url_for('admin.dashboard') }}">回後台</a></p>
 </body>
 </html>
@@ -96,7 +144,10 @@ CREATE_SESSION_HTML = """
 UPLOAD_HTML = """
 <!doctype html>
 <html>
-<head><meta charset="utf-8"><title>匯入學生名單</title></head>
+<head>
+    <meta charset="utf-8">
+    <title>匯入學生名單</title>
+</head>
 <body>
     <h1>匯入學生名單</h1>
 
@@ -119,7 +170,10 @@ UPLOAD_HTML = """
 ATTENDANCE_HTML = """
 <!doctype html>
 <html>
-<head><meta charset="utf-8"><title>出席紀錄</title></head>
+<head>
+    <meta charset="utf-8">
+    <title>出席紀錄</title>
+</head>
 <body>
     <h1>出席紀錄</h1>
 
@@ -155,16 +209,34 @@ ATTENDANCE_HTML = """
 </html>
 """
 
-import os
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "113257022")
+QR_PAGE_HTML = """
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>課次 QR Code</title>
+</head>
+<body>
+    <h1>課次 QR Code</h1>
 
-def login_required(view_func):
-    @wraps(view_func)
-    def wrapped_view(*args, **kwargs):
-        if not session.get("admin_logged_in"):
-            return redirect(url_for("admin.login"))
-        return view_func(*args, **kwargs)
-    return wrapped_view
+    <p>課次 ID：{{ session.id }}</p>
+    <p>時段：{{ session.section }}</p>
+    <p>日期：{{ session.course_date }}</p>
+    <p>開始：{{ session.opens_at }}</p>
+    <p>截止：{{ session.closes_at }}</p>
+
+    <p>請讓學生掃描下方 QR code 進行簽到：</p>
+
+    <img src="data:image/png;base64,{{ qr_base64 }}" alt="QR Code" style="max-width: 360px;">
+
+    <p>學生簽到網址：</p>
+    <p><a href="{{ checkin_url }}" target="_blank">{{ checkin_url }}</a></p>
+
+    <p><a href="{{ url_for('admin.dashboard') }}">回後台</a></p>
+</body>
+</html>
+"""
+
 
 @admin_bp.route("/login", methods=["GET", "POST"])
 def login():
@@ -174,12 +246,15 @@ def login():
             session["admin_logged_in"] = True
             return redirect(url_for("admin.dashboard"))
         return render_template_string(LOGIN_HTML, message="密碼錯誤")
+
     return render_template_string(LOGIN_HTML, message=None)
+
 
 @admin_bp.route("/logout")
 def logout():
     session.clear()
     return redirect(url_for("admin.login"))
+
 
 @admin_bp.route("/")
 @login_required
@@ -194,6 +269,7 @@ def dashboard():
         student_count=student_count,
         attendance_count=attendance_count,
     )
+
 
 @admin_bp.route("/create-session", methods=["GET", "POST"])
 @login_required
@@ -212,24 +288,35 @@ def create_session():
         db.session.add(session_obj)
         db.session.commit()
 
-        checkin_url = url_for(
-            "checkin.checkin",
-            session_id=session_obj.id,
-            token=session_obj.qr_token,
-            _external=True,
-        )
-
-        return render_template_string(
-            CREATE_SESSION_HTML,
-            message="課次建立成功",
-            checkin_url=checkin_url,
-        )
+        return redirect(url_for("admin.session_qr", session_id=session_obj.id))
 
     return render_template_string(
         CREATE_SESSION_HTML,
         message=None,
-        checkin_url=None,
     )
+
+
+@admin_bp.route("/session/<int:session_id>/qr")
+@login_required
+def session_qr(session_id):
+    session_obj = CourseSession.query.get_or_404(session_id)
+
+    checkin_url = url_for(
+        "checkin.checkin",
+        session_id=session_obj.id,
+        token=session_obj.qr_token,
+        _external=True,
+    )
+
+    qr_base64 = generate_qr_base64(checkin_url)
+
+    return render_template_string(
+        QR_PAGE_HTML,
+        session=session_obj,
+        checkin_url=checkin_url,
+        qr_base64=qr_base64,
+    )
+
 
 @admin_bp.route("/upload-students", methods=["GET", "POST"])
 @login_required
@@ -247,6 +334,7 @@ def upload_students():
             return render_template_string(UPLOAD_HTML, message=f"匯入失敗：{e}")
 
     return render_template_string(UPLOAD_HTML, message=None)
+
 
 @admin_bp.route("/attendance")
 @login_required
@@ -274,6 +362,7 @@ def attendance_records():
         })
 
     return render_template_string(ATTENDANCE_HTML, rows=rows)
+
 
 @admin_bp.route("/export-attendance")
 @login_required
