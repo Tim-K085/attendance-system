@@ -7,6 +7,8 @@ def create_app():
     app.config.from_object(Config)
 
     db.init_app(app)
+
+    from . import models
     migrate.init_app(app, db)
 
     from .admin import admin_bp

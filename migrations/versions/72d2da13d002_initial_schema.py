@@ -1,8 +1,8 @@
-"""add session and attendance tables
+"""initial schema
 
-Revision ID: 27872fca1fda
+Revision ID: 72d2da13d002
 Revises: 
-Create Date: 2026-04-07 10:53:31.249226
+Create Date: 2026-04-07 13:33:52.754310
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '27872fca1fda'
+revision = '72d2da13d002'
 down_revision = None
 branch_labels = None
 depends_on = None
