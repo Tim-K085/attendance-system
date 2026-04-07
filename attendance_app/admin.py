@@ -91,7 +91,8 @@ DASHBOARD_HTML = """
     <p><a href="{{ url_for('admin.upload_students') }}">匯入學生名單</a></p>
     <p><a href="{{ url_for('admin.attendance_records') }}">查看出席紀錄</a></p>
     <p><a href="{{ url_for('admin.export_attendance') }}">匯出 Excel 總表</a></p>
-    <p><a href="{{ url_for('admin.logout') }}">登出</a></p>
+    <p><a href="{{ url_for('admin.clear_test_data') }}" onclick="return confirm('確定要清除所有測試課次與簽到紀錄嗎？學生名單會保留。');">清除測試資料</a></p>
+    <p><a href="{{ url_for('admin.logout') }}">登出</a></p> 
 
     <h2>學生統計</h2>
     <p>目前學生總數：{{ student_count }}</p>
@@ -374,3 +375,10 @@ def export_attendance():
         download_name="attendance_report.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+@admin_bp.route("/clear-test-data")
+@login_required
+def clear_test_data():
+    Attendance.query.delete()
+    CourseSession.query.delete()
+    db.session.commit()
+    return redirect(url_for("admin.dashboard"))
